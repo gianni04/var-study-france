@@ -34,7 +34,7 @@ print("Projet VaR France - téléchargement des données...")
 def download_prices(tickers: dict, start: str, end: str = None) -> pd.DataFrame:
     """Télécharge les prix de clôture et retourne un DataFrame aligné.
 
-    On gère les cas où yfinance renvoie des données vides ou bizarres (scalaires).
+    Gère les cas yfinance (DataFrame 2D, MultiIndex, etc.).
     """
     data = {}
     for name, ticker in tickers.items():
@@ -47,8 +47,14 @@ def download_prices(tickers: dict, start: str, end: str = None) -> pd.DataFrame:
             print(f"  -> Pas de colonne 'Close' pour {name} ({ticker}), on saute.")
             continue
         px = df_yf["Close"].dropna()
-        # Forcer en Series au cas où ce serait un scalaire ou un array 0D
-        px = pd.Series(px).dropna()
+        # Si px est 2D (par ex. (n,1)), on prend la première colonne
+        if isinstance(px, pd.DataFrame):
+            if px.shape[1] == 0:
+                print(f"  -> 'Close' vide pour {name} ({ticker}), on saute.")
+                continue
+            px = px.iloc[:, 0]
+        # On a maintenant une Series 1D
+        px = px.dropna()
         if px.empty:
             print(f"  -> Série de prix vide pour {name} ({ticker}), on saute.")
             continue
@@ -104,7 +110,6 @@ def es_param_gaussienne(pnl: pd.Series, alpha: float) -> float:
 
 def backtest_var_kupiec(real_pnl: pd.Series, var_series: pd.Series, alpha: float):
     """Retourne (n_exceptions, LR_PoF, p_value)"""
-    # Exceptions: jours où la perte réelle dépasse la VaR (perte > VaR)
     losses = -real_pnl
     exceptions = losses > var_series
     n_f = exceptions.sum()
@@ -112,9 +117,7 @@ def backtest_var_kupiec(real_pnl: pd.Series, var_series: pd.Series, alpha: float
     p = 1 - alpha
     if T == 0:
         return 0, np.nan, np.nan
-    # Probabilité sous H0
     if n_f == 0 or n_f == T:
-        # éviter log(0)
         return n_f, np.nan, np.nan
     num = ((1 - p) ** (T - n_f)) * (p ** n_f)
     phat = n_f / T
@@ -136,9 +139,6 @@ print("Prices:", prices.shape)
 print("Returns:", returns.shape)
 
 # On suppose une position de CAPITAL entièrement investie dans chaque actif
-# Valeur du portefeuille pour actif i: P_i = CAPITAL
-
-# P&L journalier en EUR pour chaque actif: PNL_i,t = CAPITAL * R_i,t
 pnl = returns * CAPITAL
 
 # =============================================================
