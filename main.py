@@ -132,7 +132,7 @@ prices = download_prices(TICKERS, START, END)
 returns = compute_returns(prices, log_returns=True)
 
 print("\nDimensions des données:")
-print("Prices:\", prices.shape)
+print("Prices:", prices.shape)
 print("Returns:", returns.shape)
 
 # On suppose une position de CAPITAL entièrement investie dans chaque actif
