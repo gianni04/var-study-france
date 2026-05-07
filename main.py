@@ -16,8 +16,7 @@ os.makedirs("output", exist_ok=True)
 TICKERS = {
     "Action_TotalEnergies": "TTE.PA",   # Action française
     "Indice_CAC40": "^FCHI",           # Indice CAC 40
-    # Pour l'obligation, on utilise ici un ETF obligataire France (proxy) si dispo
-    # ou à défaut on pourra insérer une série de rendement 10Y France via CSV externe
+    # Pour l'obligation, on rajoutera plus tard une série OAT 10Y (CSV ou autre source)
 }
 
 START = "2018-01-01"  # au moins 5 ans d'historique
@@ -33,11 +32,29 @@ print("Projet VaR France - téléchargement des données...")
 # =============================================================
 
 def download_prices(tickers: dict, start: str, end: str = None) -> pd.DataFrame:
+    """Télécharge les prix de clôture et retourne un DataFrame aligné.
+
+    On gère les cas où yfinance renvoie des données vides ou bizarres (scalaires).
+    """
     data = {}
     for name, ticker in tickers.items():
         print(f"Téléchargement: {name} ({ticker})")
-        px = yf.download(ticker, start=start, end=end, auto_adjust=True)["Close"].dropna()
+        df_yf = yf.download(ticker, start=start, end=end, auto_adjust=True)
+        if df_yf is None or df_yf.empty:
+            print(f"  -> Aucune donnée pour {name} ({ticker}), on saute.")
+            continue
+        if "Close" not in df_yf.columns:
+            print(f"  -> Pas de colonne 'Close' pour {name} ({ticker}), on saute.")
+            continue
+        px = df_yf["Close"].dropna()
+        # Forcer en Series au cas où ce serait un scalaire ou un array 0D
+        px = pd.Series(px).dropna()
+        if px.empty:
+            print(f"  -> Série de prix vide pour {name} ({ticker}), on saute.")
+            continue
         data[name] = px
+    if not data:
+        raise ValueError("Aucune donnée téléchargée pour les tickers fournis. Vérifie les symboles ou la connexion réseau.")
     df = pd.DataFrame(data)
     return df
 
@@ -115,10 +132,10 @@ prices = download_prices(TICKERS, START, END)
 returns = compute_returns(prices, log_returns=True)
 
 print("\nDimensions des données:")
-print("Prices:", prices.shape)
+print("Prices:\", prices.shape)
 print("Returns:", returns.shape)
 
-# On suppose une position de CAPTIAL entièrement investie dans chaque actif
+# On suppose une position de CAPITAL entièrement investie dans chaque actif
 # Valeur du portefeuille pour actif i: P_i = CAPITAL
 
 # P&L journalier en EUR pour chaque actif: PNL_i,t = CAPITAL * R_i,t
@@ -173,6 +190,8 @@ for name in pnl.columns:
             var_i = var_historique(window_pnl, alpha)
             var_series.append(var_i)
             var_index.append(dates[i])
+        if not var_series:
+            continue
         var_series = pd.Series(var_series, index=var_index)
         aligned_pnl = pnl_series.loc[var_series.index]
         n_exc, lr_pof, p_val = backtest_var_kupiec(aligned_pnl, var_series, alpha)
